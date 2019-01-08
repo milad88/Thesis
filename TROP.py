@@ -1,10 +1,10 @@
 import sys
-from Policies import *
-from utility import *
-from Critic_Network_DDPG import *
-from Actor_Network_DDPG import *
-import tensorflow as tf
 from pendulum import PendulumEnv
+from Actor_Network_TRPO import *
+from Critic_Network_TRPO import *
+from utility import *
+
+
 if __name__ == "__main__":
     print("start")
     env = PendulumEnv()
@@ -14,7 +14,8 @@ if __name__ == "__main__":
     action_bound = env.action_space.high
     state_dim = 3
     batch_size = 32
-    learning_rate = 0.001 / batch_size
+    learning_rate = 0.001
+    delta = 0.01
     discount_factor = 0.99
     num_episodes = 2000
     len_episode = 100
@@ -22,15 +23,10 @@ if __name__ == "__main__":
     load = False
     if not load:
 
-        policies = [make_epsilon_greedy_decay_policy, make_epsilon_greedy_policy, make_ucb_policy]
-
         g_stat = []
-        policy = policies[2]
-        fname = './DDPG/log/g_' + str(num_actions) + '.csv'
 
         with tf.Session() as sess:
 
-            name = policy.__name__  # No reason to save more than one from each policy atm
             with tf.name_scope("actor"):
                 actor = Actor_Net(num_actions, action_dim, "actor", action_bound, state_dim,
                                   learning_rate=learning_rate)
@@ -61,12 +57,6 @@ if __name__ == "__main__":
             for i_episode in range(num_episodes):
 
                 loss = []
-                # to decay epsilon in case we use epsilon greedy decay policy
-                decay = np.exp(-1 / (num_episodes / 15) * i_episode)
-
-                greedy = make_greedy_policy(actor, epsilon, num_actions, i_episode, nTimes_actions, decay)
-
-                # Print out which episode we're on, useful for debugging.
                 # Also print reward for last episode
                 last_reward = stats.episode_rewards[i_episode - 1]
                 print("\rEpisode {}/{} ({})".format(i_episode + 1, num_episodes, last_reward), end="")
@@ -79,6 +69,10 @@ if __name__ == "__main__":
                 observation = env.reset()
 
                 while not done and i < len_episode:
+
+                    first = True
+                    if i == 0:
+                        first = False
                     loss = []
                     i += 1
                     old_observation = observation
@@ -94,7 +88,10 @@ if __name__ == "__main__":
 
                     q_values = target_critic.predict(sess, ns, pred_actions)
                     # y = r + (discount_factor * q_values)
-                    y = r + np.multiply(discount_factor, np.ravel(q_values))
+                    # y = r + np.multiply(discount_factor, np.ravel(q_values))
+                    # advantages
+                    y = q_values - r
+
                     y = np.reshape(y, [len(y), 1])
 
                     g_r += reward
@@ -105,10 +102,8 @@ if __name__ == "__main__":
 
                     loss.append(loss_critic[0])
 
-                    a_grads = critic.action_gradients(sess, s, actor_outs)
-
                     sys.stdout.flush()
-                    actor.update(sess, s, a_grads, None)
+                    actor.update(sess, s, a, y, None, first)
 
                     stats.episode_rewards[i_episode] += reward
 

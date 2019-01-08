@@ -45,7 +45,7 @@ class Critic_Net(NeuralNetwork):
         #        Q_grad = K.gradients(Q_pred, actions)
 
         self.trainer = tf.train.AdamOptimizer(self.learning_rate)
-        self.loss = tf.reduce_mean(tf.square(self.y_ - self.outputs))
+        self.loss = tf.reduce_mean(tf.squared_difference(self.outputs, self.y_))
 
         self.step = self.trainer.minimize(self.loss)
 
@@ -109,8 +109,8 @@ class Critic_Target_Network(Critic_Net):
 
     def _register_associate(self):
 
-        critic_vars =tf.trainable_variables("critic")
-        target_vars =tf.trainable_variables("critic_target")
+        critic_vars =tf.trainable_variables()#"critic"
+        target_vars =tf.trainable_variables()#"critic_target"
 
         #print(tf_vars)
 

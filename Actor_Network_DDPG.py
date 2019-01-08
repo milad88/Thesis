@@ -125,9 +125,11 @@ class Actor_Net():
 
         states = np.atleast_2d(states)
         states = np.reshape(states, [len(states), 3])
-        for ix, grad in enumerate(self.actor_gradients):
-            self.actor_gradients[ix] = grad / float(self.batch_size)
-        sess.run(self.optimize, feed_dict={self.inp: states, self.action_gradients: grads[0]})
+        #hists = []
+        #for ix, grad in enumerate(self.actor_gradients):
+            #self.actor_gradients[ix] = grad / float(self.batch_size)
+            #hists.append(tf.summary.histogram(str(ix)+'/gradient', grad))
+        sess.run((self.optimize), feed_dict={self.inp: states, self.action_gradients: grads[0]})
 
 
 
@@ -145,8 +147,8 @@ class Actor_Target_Network(Actor_Net):
 
     def _register_associate(self):
 
-        actor_vars = tf.trainable_variables("actor")
-        target_vars = tf.trainable_variables("actor_target")
+        actor_vars = tf.trainable_variables()#"actor"
+        target_vars = tf.trainable_variables()#"actor_target"
 
         # print(tf_vars)
 
@@ -156,7 +158,6 @@ class Actor_Target_Network(Actor_Net):
         for idx, var in enumerate(target_vars):  # // is to retun un integer
             op_holder.append(var.assign(
                 (actor_vars[idx].value() * self.tau) + ((1 - self.tau) * var.value())))
-        # return target_vars.assign((actor_vars * self.tau )+((1 - self.tau) * target_vars))
         return op_holder
 
     def update(self, sess):
