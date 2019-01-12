@@ -86,7 +86,7 @@ class Critic_Net(NeuralNetwork):
 
         states = np.atleast_2d(states)
         states = np.reshape(states, [len(states), 3])
-        return sess.run((self.loss, self.outputs, self.step), feed_dict={self.inp: states,self.action: actions, self.y_: targets})
+        return sess.run(self.loss, feed_dict={self.inp: states,self.action: actions, self.y_: targets})
 
 
     def action_gradients(self, sess, states, actions):
@@ -108,12 +108,8 @@ class Critic_Target_Network(Critic_Net):
 
     def _register_associate(self):
 
-        critic_vars =tf.trainable_variables()#"critic"
-        target_vars =tf.trainable_variables()#"critic_target"
-
-        #print(tf_vars)
-
-        #total_vars = len(tf_vars)
+        critic_vars =tf.trainable_variables("critic")#"critic"
+        target_vars =tf.trainable_variables("critic_target")#"critic_target"
 
         op_holder = []
         for idx, var in enumerate(target_vars):  # // is to retun un integer

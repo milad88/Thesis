@@ -1,5 +1,5 @@
 from utility import *
-
+import itertools
 action_bound = 2.0
 
 
@@ -16,8 +16,13 @@ class Actor_Net():
 
     def _build_model(self, num_actions):
 
-        self.inp = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32)
-        self.actions = tf.placeholder(shape=[None, self.action_dim], dtype=tf.float32)
+        self.inp = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32, name="states")
+        self.actions = tf.placeholder(shape=[None, self.action_dim], dtype=tf.float32, name="actions")
+
+        self.advantage = tf.placeholder(dtype=tf.float32, shape=[None, 1], name="advantages")
+        self.old_mean = tf.placeholder(dtype=tf.float32, name="old_mean")
+        self.old_sigma = tf.placeholder(dtype=tf.float32, name="old_sigma")
+        self.p = tf.placeholder(tf.float32, name="p")  # the vector
 
         self.inpW = tf.Variable(tf.random_uniform([self.state_dim, 16], -0.5, 0.5))
         self.inpB = tf.Variable(tf.constant(0.1, shape=[16]))
@@ -35,56 +40,71 @@ class Actor_Net():
 
         self.outB = tf.Variable(tf.constant(0.01, shape=[self.action_dim]))
 
+        self.net_params = tf.trainable_variables(scope=self.name)
+
         self.mean = tf.nn.tanh(tf.matmul(self.h3, self.h4W) + self.outB)
         self.mean = self.mean * self.action_bound
 
         self.sigma = tf.nn.relu(tf.matmul(self.h3, self.h4W) + self.outB)
 
-        self.net_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.name)
+        self.net_params = tf.trainable_variables(scope=self.name)
 
         self.sigma = tf.clip_by_value(t=self.sigma,
                                       clip_value_min=0,
                                       clip_value_max=tf.sqrt(self.action_bound))
-
-        self.advantage = tf.placeholder(dtype=tf.float32, shape=[None, 1])
-        self.old_mean = tf.placeholder(dtype=tf.float32)
-        self.old_sigma = tf.placeholder(dtype=tf.float32)
-        self.p = tf.placeholder(tf.float32)  # the vector
-
         self.scaled_out = tf.truncated_normal(mean=self.mean, stddev=self.sigma, shape=[self.action_dim])
+        self.prev_mean = 0
+        self.prev_sigma = 1
+        self.cost = tf.reduce_sum(
+            tf.multiply(gauss_prob(self.mean, self.sigma, self.scaled_out), self.advantage) / (gauss_prob(
+                self.prev_mean, self.prev_sigma, self.scaled_out)))
+
+        self.grads = tf.gradients(self.cost, self.net_params, gate_gradients=True)
+
+        self.shapes = [v.shape.as_list() for v in self.net_params]
+        self.size_theta = np.sum([np.prod(shape) for shape in self.shapes])
+
+        tangents = []
+        start = 0
+        for shape in self.shapes:
+            size = np.prod(shape)
+            tangents.append(tf.reshape(self.p[start:start + size], shape))
+            start += size
+        # self.gvp = tf.add_n([tf.reduce_sum(g * tangent) for (g, tangent) in zip(grads, tangents)])
+        self.gvp = [(tf.reduce_sum(g * t)) for (g, t) in zip(self.grads, tangents)]
+        # 2nd gradient of KL w/ itself * tangent
+
+        self.hvp = flatgrad(self.gvp, self.net_params)
 
         self.saver = tf.train.Saver()
 
-
-
     def conjugate_gradient(self, f_Ax, b, cg_iters=10, residual_tol=1e-10):
-
         p = b.copy()
         r = b.copy()
         x = np.zeros_like(b)
-        rdotr = np.mat(r) * np.mat(r.T)
-
-        print("rdotr")
+        rdotr = r.dot(r)
         for i in range(cg_iters):
-            print("into for")
             z = f_Ax(p)
-            v = rdotr / np.dot(p,z) #p.dot(z)  # step size?? =ak of wikipedia
-            x += v * p  # new parameters??
-            r -= v * z  # new gradient??
-            newrdotr = np.dot(r, r) #
+            a = p.dot(z)  # shape a is (8,)
+            v = rdotr / a  # p.dot(z)  # stepdir size?? =ak of wikipedia
+            x += np.dot(v,p)
+            # x += v * p  # new parameters??
+            r -= z.dot(v)  # new gradient??
+            newrdotr = np.dot(r, r)  #
             if newrdotr < residual_tol:
                 break
 
             mu = newrdotr / rdotr  # Bi of wikipedia
             rdotr = newrdotr
             p = r + mu * p
+
         return x
 
-    def linesearch(f, x, fullstep, expected_improve_rate):
+    def linesearch(self, f, x, fullstepdir, expected_improve_rate):
         '''
         :param f: loss fuction
         :param x: parameters
-        :param fullstep: value returned by conjugate gradient * Hg-1 ... delta kappa estimated by the conjugate gradient
+        :param fullstepdir: value returned by conjugate gradient * Hg-1 ... delta kappa estimated by the conjugate gradient
         :param expected_improve_rate:
         :return:
         '''
@@ -92,11 +112,11 @@ class Actor_Net():
         accept_ratio = .1
         max_backtracks = 10
         fval = f(x)
-        for (_n_backtracks, stepfrac) in enumerate(.5 ** np.arange(max_backtracks)):
-            xnew = x + stepfrac * fullstep
+        for (_n_backtracks, stepdirfrac) in enumerate(.5 ** np.arange(max_backtracks)):
+            xnew = x + (stepdirfrac * fullstepdir)
             newfval = f(xnew)
             actual_improve = fval - newfval
-            expected_improve = expected_improve_rate * stepfrac
+            expected_improve = expected_improve_rate * stepdirfrac
             ratio = actual_improve / expected_improve
             if ratio > accept_ratio and actual_improve > 0:
                 return xnew
@@ -126,7 +146,7 @@ class Actor_Net():
 
     # action gradient to be fed
 
-    def update(self, sess, states, actions, advantages, summary, first=False):
+    def update(self, sess, states, actions, advantages, summary, first):
         """
         Updates the weights of the neural network, based on its targets, its
         predictions, its loss and its optimizer.
@@ -140,57 +160,56 @@ class Actor_Net():
         states = np.atleast_2d(states)
         states = np.reshape(states, [len(states), 3])
 
-        if not first:
-            old_mean = 0
-            old_sigma = 1
-        else:
-            old_mean = self.mean
-            old_sigma = self.sigma
-            # /ratio
-
-        feed_dict = {self.inp: states, self.actions: actions}
-        mean, sigma, scaled_out = sess.run((self.mean, self.sigma, self.scaled_out), feed_dict)
-
-        self.cost = tf.reduce_sum(
-            tf.multiply(gauss_prob(self.mean, self.sigma, [self.scaled_out]), self.advantage) / gauss_prob(
-                old_mean, old_sigma, [scaled_out]))
-        self.grads = tf.gradients(self.cost, self.net_params, gate_gradients=True)
+        #feed_dict = {self.inp: states, self.actions: actions}
+        #mean, sigma, scaled_out = sess.run((self.mean, self.sigma, self.scaled_out), feed_dict)
 
         feed_dict = {self.inp: states, self.actions: actions,
-                     self.old_mean: old_mean, self.old_sigma: old_sigma,
+                     self.old_mean: self.prev_mean, self.old_sigma: self.prev_sigma,
                      self.advantage: advantages}
 
+        self.prev_mean, self.prev_sigma, s_out, cost, net, grads = sess.run(
+                    (self.mean, self.sigma, self.scaled_out, self.cost, self.net_params, self.grads), feed_dict)
 
 
-        cost, net, grads = sess.run((self.cost, self.net_params, self.grads), feed_dict)
+        grads = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, grads)], 0)
+        grads = np.where(np.isnan(grads), 1e-16, grads)
 
-        #self.hess = tf.gradients(self.grads, net, gate_gradients=True)
-
-        self.shapes = [v.shape.as_list() for v in self.net_params]
-        self.size_theta = np.sum([np.prod(shape) for shape in self.shapes])
-
-        tangents = []
-        start = 0
-        for shape in self.shapes:
-            size = np.prod(shape)
-            tangents.append(tf.reshape(self.p[start:start + size], shape))
-            start += size
-        gvp = tf.add_n([tf.reduce_sum(g * tangent) for (g, tangent) in zip(grads, tangents)])
-        self.hvp = tf.gradients(gvp, self.net_params)
+        self.sff = SetFromFlat(sess, net)
 
         def get_hvp(p):
-            feed_dict[self.p] = p
-            return sess.run(self.hvp, feed_dict) + 1e-3 * p
+            feed_dict[self.p] = p  # np.reshape(p, [np.size(p),1])
+            #a = sess.run(self.hvp, feed_dict)
+            a = tf.gradients(self.gvp, net, gate_gradients=True)
 
-        grads = np.concat([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, grads)], 0)
-        grads = np.array(grads)
-        print(grads.shape)
+            a = [0. + 1e-16 if g is None else g for g in a]
+
+
+#            a = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, a)], 0)
+            return np.sum((1e-3 * np.reshape(p, [np.size(p), 1])) + np.reshape(a, [1, np.size(a)]), 1)
+
+            # return np.array(flatgrad(self.gvp, self.net_params))# + 1e-3 * p
+
         self.cg = self.conjugate_gradient(get_hvp, -grads)
+        self.stepdir = np.sqrt(2 * self.learning_rate / (np.transpose(grads) * self.cg) + 1e-16) * self.cg
 
-        self.step = tf.sqrt(2 * self.learning_rate / (tf.transpose(grads) * self.cg)) * self.cg
-        decay = 1
-        # decay = linesearch(f, self.net_params, self.step,)
-        self.net_params = net + self.step * decay
+        def loss(th):
+            th = np.concatenate([np.reshape(g,[-1]) for g in th],0)
+            self.sff(th)
+            # surrogate loss: policy gradient loss
+            d = sess.run(self.cost, feed_dict)
+            return d
+        
+        stepsize = self.linesearch(loss,  np.concatenate([np.reshape(g,[-1]) for g in net],0), self.stepdir, self.cg.dot(self.stepdir))
+
+        # self.net_params = sess.run(tf.assign(self.net_params, self.net_params + self.stepdir))#+ self.stepdir)# * stepsize
+        #+ self.stepdir)# * stepsize
+        for i, v in enumerate(self.net_params):
+            try:
+                for k in range(len(v)):
+                    self.net_params[i][k] += self.stepdir[i][k] * stepsize[i][k]
+            except:
+                self.net_params[i] += self.stepdir[i] * stepsize[i]
+
 
 
 class Actor_Target_Network(Actor_Net):
@@ -210,10 +229,6 @@ class Actor_Target_Network(Actor_Net):
         actor_vars = tf.trainable_variables()  # "actor"
         target_vars = tf.trainable_variables()  # "actor_target"
 
-        # print(tf_vars)
-
-        # total_vars = len(tf_vars)
-
         op_holder = []
         for idx, var in enumerate(target_vars):  # // is to retun un integer
             op_holder.append(var.assign(
@@ -226,4 +241,3 @@ class Actor_Target_Network(Actor_Net):
 
     def get_old_mean_and_sigma(self):
         return self.old_mean, self.old_sigma
-

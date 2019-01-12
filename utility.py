@@ -4,13 +4,31 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import itertools
-
+from math import isnan
 EpisodeStats = namedtuple("Stats", ["episode_lengths", "episode_rewards"])
 batch_size = 32
 
+
+def var_shape(x):
+    try:
+        out = [k for k in x.shape]
+    except:
+        out = [1]
+    assert all(isinstance(a, int) for a in out), \
+        "shape function assumes that shape is fully known"
+    return out
+
 def flatgrad(loss, var_list):
     grads = tf.gradients(loss, var_list)
-    return tf.concat([tf.reshape(grad, [np.size(v)]) for (v, grad) in zip(var_list, grads)], 0)
+    grads = [0. + 1e-16 if g is None else g for g in grads]
+
+    grads = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(var_list, grads)], 0)
+#    grads = np.where(np.isnan(grads), 1e-16, grads)
+    # np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, grads)], 0)
+    #return np.concatenate([np.reshape(grad, np.size(v)) for (v, grad) in zip(var_list, grads)], 0)
+    #grads = np.where(np.isnan(grads), 0, grads)
+    return grads
+
 
 def gauss_log_prob(mu, logstd, x):
     var = tf.exp(2 * logstd)
@@ -20,10 +38,7 @@ def gauss_log_prob(mu, logstd, x):
 
 def gauss_prob(mu, std, xs):
     var = std ** 2
-    gp = []
-    for i, x in enumerate(xs):
-        gp.append(tf.exp(-tf.square(x - mu) / (2 * var)) / (tf.sqrt(tf.constant(2 * np.pi)) * std))
-    return gp
+    return tf.exp(-tf.square(xs - mu) / (2 * var)) / (tf.sqrt(tf.constant(2 * np.pi)) * std)
 
 
 # KL divergence between two paramaterized guassian distributions
@@ -83,6 +98,27 @@ def plot_episode_stats(stats, smoothing_window=10, noshow=False):
         plt.close(fig2)
     else:
         plt.show(fig2)
+
+
+class SetFromFlat(object):
+
+    def __init__(self, session, var_list):
+        self.session = session
+        assigns = []
+        shapes = map(var_shape, var_list)
+        total_size = sum(np.prod(shape) for shape in shapes)
+        self.theta = theta = tf.placeholder(tf.float32, [total_size])
+        start = 0
+        assigns = []
+        for (shape, v) in zip(shapes, var_list):
+            size = np.prod(shape)
+            assigns.append(tf.assign(v,tf.reshape(theta[start:start + size],shape)))
+            start += size
+
+        self.op = tf.group(*assigns)
+
+    def __call__(self, theta):
+        self.session.run(self.op, feed_dict={self.theta: theta})
 
 
 class ReplayBuffer:

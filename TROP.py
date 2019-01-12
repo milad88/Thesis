@@ -42,12 +42,12 @@ if __name__ == "__main__":
                 target_critic = Critic_Target_Network(num_actions, action_dim, "critic_target", action_bound, state_dim,
                                                       learning_rate=learning_rate)
 
-            writer = tf.summary.FileWriter('./DDPG/log/DDPG_loss', sess.graph)
+            writer = tf.summary.FileWriter('./TRPO/log/TRPO_loss', sess.graph)
             summ_critic_loss = tf.summary.scalar('loss_critic', critic.get_loss())
 
             sess.run(tf.global_variables_initializer())
             """
-            DDPG
+            Trpo
             """
             loss_episodes = []
             stats = EpisodeStats(episode_lengths=np.zeros(num_episodes), episode_rewards=np.zeros(num_episodes))
@@ -70,9 +70,9 @@ if __name__ == "__main__":
 
                 while not done and i < len_episode:
 
-                    first = True
+                    first = False
                     if i == 0:
-                        first = False
+                        first = True
                     loss = []
                     i += 1
                     old_observation = observation
@@ -84,23 +84,19 @@ if __name__ == "__main__":
                     buffer.add_transition(old_observation, action, observation, reward, done)
                     s, a, ns, r, d = buffer.next_batch(batch_size)
 
-                    pred_actions = target_actor.predict(sess, ns)
+                    pred_actions = actor.predict(sess, ns)
 
                     q_values = target_critic.predict(sess, ns, pred_actions)
-                    # y = r + (discount_factor * q_values)
-                    # y = r + np.multiply(discount_factor, np.ravel(q_values))
-                    # advantages
-                    y = q_values - r
 
-                    y = np.reshape(y, [len(y), 1])
+                    r = np.reshape(r,[-1,1])
+                    y = q_values - r
 
                     g_r += reward
                     g_stat.append(int(np.round(g_r)))
-                    actor_outs = np.take(actor.predict(sess, s), 0, 1)
-                    actor_outs = np.reshape(actor_outs, [len(actor_outs), 1])
+
                     loss_critic = critic.update(sess, s, a, y, summ_critic_loss)
 
-                    loss.append(loss_critic[0])
+                    loss.append(loss_critic)
 
                     sys.stdout.flush()
                     actor.update(sess, s, a, y, None, first)
