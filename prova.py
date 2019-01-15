@@ -1,5 +1,9 @@
 import numpy as np
 
-gaus = np.random.normal([[0], [0], [1]], [[2]])
+a = np.ones([4])
+b = np.zeros([4])
+c = np.array([a,b])
+for r in c:
+    r = r *2
 
-print(gaus)
+print(c)

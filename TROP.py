@@ -17,15 +17,19 @@ if __name__ == "__main__":
     learning_rate = 0.001
     delta = 0.01
     discount_factor = 0.99
-    num_episodes = 2000
-    len_episode = 100
+    num_episodes = 2
+    len_episode = 10
     epsilon = 0.1
     load = False
     if not load:
 
         g_stat = []
 
-        with tf.Session() as sess:
+        config = tf.ConfigProto()
+        config.intra_op_parallelism_threads = 8
+        config.gpu_options.per_process_gpu_memory_fraction = 0.33
+
+        with tf.Session(config=config)as sess:
 
             with tf.name_scope("actor"):
                 actor = Actor_Net(num_actions, action_dim, "actor", action_bound, state_dim,
@@ -35,17 +39,12 @@ if __name__ == "__main__":
                 critic = Critic_Net(num_actions, action_dim, "critic", action_bound, state_dim,
                                     learning_rate=learning_rate)
 
-            with tf.name_scope("actor_target"):
-                target_actor = Actor_Target_Network(num_actions, action_dim, "actor_target", action_bound, state_dim,
-                                                    learning_rate=learning_rate)
-            with tf.name_scope("critic_target"):
-                target_critic = Critic_Target_Network(num_actions, action_dim, "critic_target", action_bound, state_dim,
-                                                      learning_rate=learning_rate)
 
-            writer = tf.summary.FileWriter('./TRPO/log/TRPO_loss', sess.graph)
+            writer = tf.summary.FileWriter('./TRPO/TRPO_loss', sess.graph)
             summ_critic_loss = tf.summary.scalar('loss_critic', critic.get_loss())
 
             sess.run(tf.global_variables_initializer())
+            g = sess.graph
             """
             Trpo
             """
@@ -55,7 +54,6 @@ if __name__ == "__main__":
             nTimes_actions = np.ones(num_actions)
 
             for i_episode in range(num_episodes):
-
                 loss = []
                 # Also print reward for last episode
                 last_reward = stats.episode_rewards[i_episode - 1]
@@ -70,9 +68,10 @@ if __name__ == "__main__":
 
                 while not done and i < len_episode:
 
-                    first = False
-                    if i == 0:
-                        first = True
+                    first = True
+                    if i != 0:
+                        first = False
+                        sess.graph.clear_collection("theta_sff")
                     loss = []
                     i += 1
                     old_observation = observation
@@ -80,13 +79,13 @@ if __name__ == "__main__":
 
                     env.render()
                     observation, reward, done, info = env.step([action])
-                    #if i < 5 or reward > 0:
+
                     buffer.add_transition(old_observation, action, observation, reward, done)
                     s, a, ns, r, d = buffer.next_batch(batch_size)
 
                     pred_actions = actor.predict(sess, ns)
 
-                    q_values = target_critic.predict(sess, ns, pred_actions)
+                    q_values = critic.predict(sess, ns, pred_actions)
 
                     r = np.reshape(r,[-1,1])
                     y = q_values - r
@@ -99,14 +98,14 @@ if __name__ == "__main__":
                     loss.append(loss_critic)
 
                     sys.stdout.flush()
+
                     actor.update(sess, s, a, y, None, first)
 
                     stats.episode_rewards[i_episode] += reward
 
-                    target_critic.update(sess)
-                    target_actor.update(sess)
-
                     g_stat.append(int(np.round(g_r)))
+
+                    #sess.graph.as_default()
 
                 l = sum(loss)
                 summ_critic_loss = tf.Summary(value=[tf.Summary.Value(tag="loss_critic",
@@ -122,6 +121,11 @@ if __name__ == "__main__":
 
                 stats.episode_lengths[i_episode] = i
 
+                gc.collect()
+                #tf.reset_default_graph()
+
+                #tf.get_default_graph().finalize()
+            print(type(stats))
             plot_episode_stats(stats)
             plot_stats(loss_episodes)
             # return stats, loss_episodes

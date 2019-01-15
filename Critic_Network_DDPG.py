@@ -112,10 +112,6 @@ class Critic_Target_Network(Critic_Net):
         critic_vars =tf.trainable_variables()#"critic"
         target_vars =tf.trainable_variables()#"critic_target"
 
-        #print(tf_vars)
-
-        #total_vars = len(tf_vars)
-
         op_holder = []
         for idx, var in enumerate(target_vars):  # // is to retun un integer
             op_holder.append(var.assign(

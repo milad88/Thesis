@@ -3,6 +3,7 @@ from collections import namedtuple
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import gc
 import itertools
 from math import isnan
 EpisodeStats = namedtuple("Stats", ["episode_lengths", "episode_rewards"])
@@ -21,12 +22,7 @@ def var_shape(x):
 def flatgrad(loss, var_list):
     grads = tf.gradients(loss, var_list)
     grads = [0. + 1e-16 if g is None else g for g in grads]
-
     grads = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(var_list, grads)], 0)
-#    grads = np.where(np.isnan(grads), 1e-16, grads)
-    # np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, grads)], 0)
-    #return np.concatenate([np.reshape(grad, np.size(v)) for (v, grad) in zip(var_list, grads)], 0)
-    #grads = np.where(np.isnan(grads), 0, grads)
     return grads
 
 
@@ -40,13 +36,13 @@ def gauss_prob(mu, std, xs):
     var = std ** 2
     return tf.exp(-tf.square(xs - mu) / (2 * var)) / (tf.sqrt(tf.constant(2 * np.pi)) * std)
 
-
 # KL divergence between two paramaterized guassian distributions
 def gauss_KL(mu1, std1, mu2, std2):
     var1 = std1 ** 2
     var2 = std2 ** 2
 
     kl = tf.reduce_sum(tf.log(std2) - tf.log(std1) + (var1 + tf.square(mu1 - mu2)) / (2 * var2) - 0.5)
+
     return kl
 
 
@@ -88,8 +84,8 @@ def plot_stats(stats):
 def plot_episode_stats(stats, smoothing_window=10, noshow=False):
     # Plot the episode reward over time
     fig2 = plt.figure(figsize=(10, 5))
-    rewards_smoothed = pd.Series(stats.episode_rewards).rolling(smoothing_window, min_periods=smoothing_window).mean()
-    plt.plot(rewards_smoothed)
+    #rewards_smoothed = pd.Series(stats.episode_rewards).rolling(smoothing_window, min_periods=smoothing_window).mean()
+    plt.plot(stats.episode_rewards)
     plt.xlabel("Episode")
     plt.ylabel("Episode Reward (Smoothed)")
     plt.title("Episode Reward over Time (Smoothed over window size {})".format(smoothing_window))
@@ -104,18 +100,18 @@ class SetFromFlat(object):
 
     def __init__(self, session, var_list):
         self.session = session
-        assigns = []
-        shapes = map(var_shape, var_list)
-        total_size = sum(np.prod(shape) for shape in shapes)
-        self.theta = theta = tf.placeholder(tf.float32, [total_size])
+        self.var_list = var_list
+        self.shapes = map(var_shape, var_list)
+        total_size = sum(np.prod(shape) for shape in self.shapes)
+        self.theta = theta = tf.placeholder(tf.float32, [total_size],name="theta_sff")
         start = 0
         assigns = []
-        for (shape, v) in zip(shapes, var_list):
+        for (shape, v) in zip(self.shapes, self.var_list):
             size = np.prod(shape)
-            assigns.append(tf.assign(v,tf.reshape(theta[start:start + size],shape)))
+            assigns.append(tf.assign(v, tf.reshape(theta[start:start + size], shape)))
             start += size
 
-        self.op = tf.group(*assigns)
+        self.op = assigns
 
     def __call__(self, theta):
         self.session.run(self.op, feed_dict={self.theta: theta})

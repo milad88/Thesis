@@ -53,16 +53,16 @@ class Actor_Net():
                                       clip_value_min=0,
                                       clip_value_max=tf.sqrt(self.action_bound))
         self.scaled_out = tf.truncated_normal(mean=self.mean, stddev=self.sigma, shape=[self.action_dim])
-        self.prev_mean = 0
-        self.prev_sigma = 1
-        self.cost = tf.reduce_sum(
-            tf.multiply(gauss_prob(self.mean, self.sigma, self.scaled_out), self.advantage) / (gauss_prob(
-                self.prev_mean, self.prev_sigma, self.scaled_out)))
+        self.prev_mean = 0.
+        self.prev_sigma = 1.
+        #self.cost = gauss_KL(self.mean, self.sigma, self.prev_mean, self.prev_sigma)
+        self.cost = tf.reduce_sum((gauss_prob(self.mean, self.sigma, self.scaled_out) * self.advantage) /
+                        (gauss_prob(self.prev_mean, self.prev_sigma, self.scaled_out)) + 1e-10)
 
-        self.grads = tf.gradients(self.cost, self.net_params, gate_gradients=True)
+        self.grads = tf.gradients(self.cost, self.net_params)
 
         self.shapes = [v.shape.as_list() for v in self.net_params]
-        self.size_theta = np.sum([np.prod(shape) for shape in self.shapes])
+        #self.size_theta = np.sum([np.prod(shape) for shape in self.shapes])
 
         tangents = []
         start = 0
@@ -78,15 +78,14 @@ class Actor_Net():
 
         self.saver = tf.train.Saver()
 
-    def conjugate_gradient(self, f_Ax, b, cg_iters=10, residual_tol=1e-10):
+    def conjugate_gradient(self, f_Ax, b, cg_iters=5, residual_tol=1e-5):
         p = b.copy()
         r = b.copy()
         x = np.zeros_like(b)
         rdotr = r.dot(r)
         for i in range(cg_iters):
             z = f_Ax(p)
-            a = p.dot(z)  # shape a is (8,)
-            v = rdotr / a  # p.dot(z)  # stepdir size?? =ak of wikipedia
+            v = rdotr / p.dot(z) # p.dot(z)  # stepdir size?? =ak of wikipedia
             x += np.dot(v,p)
             # x += v * p  # new parameters??
             r -= z.dot(v)  # new gradient??
@@ -100,7 +99,7 @@ class Actor_Net():
 
         return x
 
-    def linesearch(self, f, x, fullstepdir, expected_improve_rate):
+    def linesearch(self, f, x, fullstepdir, expected_improve_rate, max_iter=5):
         '''
         :param f: loss fuction
         :param x: parameters
@@ -108,19 +107,23 @@ class Actor_Net():
         :param expected_improve_rate:
         :return:
         '''
-
+        j = max_iter
         accept_ratio = .1
         max_backtracks = 10
+
         fval = f(x)
         for (_n_backtracks, stepdirfrac) in enumerate(.5 ** np.arange(max_backtracks)):
+            j -= 1
             xnew = x + (stepdirfrac * fullstepdir)
             newfval = f(xnew)
             actual_improve = fval - newfval
             expected_improve = expected_improve_rate * stepdirfrac
             ratio = actual_improve / expected_improve
-            if ratio > accept_ratio and actual_improve > 0:
+            if ratio > accept_ratio and actual_improve > 0 or j == 0:
                 return xnew
+
         return x
+
 
     def predict(self, sess, states):
         """
@@ -167,24 +170,23 @@ class Actor_Net():
                      self.old_mean: self.prev_mean, self.old_sigma: self.prev_sigma,
                      self.advantage: advantages}
 
-        self.prev_mean, self.prev_sigma, s_out, cost, net, grads = sess.run(
+        self.prev_mean, self.prev_sigma,_, _, net, grads = sess.run(
                     (self.mean, self.sigma, self.scaled_out, self.cost, self.net_params, self.grads), feed_dict)
-
 
         grads = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, grads)], 0)
         grads = np.where(np.isnan(grads), 1e-16, grads)
 
-        self.sff = SetFromFlat(sess, net)
+        #self.sff = SetFromFlat(sess, net)
 
         def get_hvp(p):
             feed_dict[self.p] = p  # np.reshape(p, [np.size(p),1])
-            #a = sess.run(self.hvp, feed_dict)
-            a = tf.gradients(self.gvp, net, gate_gradients=True)
-
-            a = [0. + 1e-16 if g is None else g for g in a]
-
-
+            gvp = sess.run(self.gvp, feed_dict)
+            gvp = np.where(np.isnan(gvp), 0, gvp)
+            #with tf.control_dependencies(self.gvp):
+            a = tf.gradients(gvp, self.net_params)
+            a = [0 if k is None else  k for k in a]
 #            a = np.concatenate([np.reshape(grad, [np.size(v)]) for (v, grad) in zip(net, a)], 0)
+
             return np.sum((1e-3 * np.reshape(p, [np.size(p), 1])) + np.reshape(a, [1, np.size(a)]), 1)
 
             # return np.array(flatgrad(self.gvp, self.net_params))# + 1e-3 * p
@@ -193,22 +195,28 @@ class Actor_Net():
         self.stepdir = np.sqrt(2 * self.learning_rate / (np.transpose(grads) * self.cg) + 1e-16) * self.cg
 
         def loss(th):
-            th = np.concatenate([np.reshape(g,[-1]) for g in th],0)
-            self.sff(th)
+            #th = np.concatenate([np.reshape(g,[-1]) for g in th],0)
+            #self.sff(th)
+            start = 0
+            i = 0
+            for (shape, v) in zip(self.shapes, self.net_params):
+                size = np.prod(shape)
+                self.net_params[i] = tf.reshape(th[start:start + size], shape)
+                start += size
+                i += 1
             # surrogate loss: policy gradient loss
-            d = sess.run(self.cost, feed_dict)
-            return d
-        
-        stepsize = self.linesearch(loss,  np.concatenate([np.reshape(g,[-1]) for g in net],0), self.stepdir, self.cg.dot(self.stepdir))
+            return sess.run(self.cost, feed_dict)
 
+        stepsize = self.linesearch(loss, np.concatenate([np.reshape(g,[-1]) for g in net],0), self.stepdir, self.cg.dot(self.stepdir))
+        #del self.sff
         # self.net_params = sess.run(tf.assign(self.net_params, self.net_params + self.stepdir))#+ self.stepdir)# * stepsize
         #+ self.stepdir)# * stepsize
         for i, v in enumerate(self.net_params):
             try:
                 for k in range(len(v)):
-                    self.net_params[i][k] += self.stepdir[i][k] * stepsize[i][k]
+                    self.net_params[i][k] += self.stepdir[i][k] * self.net_params[i][k]
             except:
-                self.net_params[i] += self.stepdir[i] * stepsize[i]
+                self.net_params[i] += self.stepdir[i] * self.net_params[i]
 
 
 
