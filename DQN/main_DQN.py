@@ -1,5 +1,5 @@
 import os
-from DQN.DQN import *
+from DQN import *
 from Policies import *
 from utility import *
 
@@ -10,7 +10,6 @@ from lib.envs.pendulum import PendulumEnv
 
 if __name__ == "__main__":
     print("start")
-    env = PendulumEnv()
 
     action_space = np.arange(-2, 2.01, 0.01)
     num_actions = len(action_space)
@@ -30,22 +29,26 @@ if __name__ == "__main__":
         if statrun:
             n_ep = 1000
             l_ep = 100
-            batch_size = 32
+            batch_size = 16
             policies = [make_epsilon_greedy_decay_policy, make_epsilon_greedy_policy, make_ucb_policy]
 
             g_stat = []
             policy = policies[2]
             fname = './log/g_' + str(num_actions) + '.csv'
-            with tf.Session() as sess:
+            with tf.Session(config=config) as sess:
 
                 train_writer = tf.summary.FileWriter('./log/loss', sess.graph)
 
                 name = policy.__name__  # No reason to save more than one from each policy atm
-                approx = NeuralNetwork(num_actions, name)
-                target = TargetNetwork(num_actions, name)
 
-                summ_loss = tf.summary.scalar('loss', approx.loss)
-                tf.summary.histogram('loss_hist', approx.loss)
+                env = PendulumEnv()
+                env.reset()
+
+                approx = NeuralNetwork(num_actions, "approx")
+                target = TargetNetwork(num_actions, "target")
+
+#                summ_loss = tf.summary.scalar('loss', approx.loss)
+ #               tf.summary.histogram('loss_hist', approx.loss)
 
                 sess.run(tf.global_variables_initializer())
                 stats, loss = q_learning(sess, env, approx, n_ep, l_ep, action_space, num_actions,
@@ -54,7 +57,7 @@ if __name__ == "__main__":
                                          policy_fn=policy, stat=True,
                                          g_stat=g_stat,
                                          writer=train_writer,
-                                         summary=summ_loss)
+                                         summary=None)
                 train_writer.flush()
 
             g_stat = np.array([g_stat])

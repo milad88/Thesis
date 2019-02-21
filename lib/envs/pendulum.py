@@ -43,12 +43,12 @@ class PendulumEnv(gym.Env):
         m = 1.
         l = 1.
         dt = self.dt
-
         u = np.clip(u, -self.max_torque, self.max_torque)[0]
 
         self.last_u = u
         newthdot = thdot + (-3 * g / (2 * l) * np.sin(th + np.pi) + 3. / (m * l ** 2) * u) * dt
         newth = th + newthdot * dt
+
         newthdot = np.clip(newthdot, -self.max_speed, self.max_speed)
         reward = self.reward(self)
 
@@ -96,6 +96,9 @@ class PendulumEnv(gym.Env):
             self.imgtrans.scale = (-self.last_u / 2, np.abs(self.last_u) / 2)
 
         return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+    def setstate(self, state):
+        self.state = np.array([np.arccos(state[0]), state[2]])
 
 
 def angle_normalize(x):

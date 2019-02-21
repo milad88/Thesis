@@ -40,8 +40,6 @@ class Actor_Net():
 
         self.outB = tf.Variable(tf.constant(0.01, shape=[self.action_dim]))
 
-        self.net_params = tf.trainable_variables(scope=self.name)
-
         self.mean = tf.nn.tanh(tf.matmul(self.h3, self.h4W) + self.outB)
         self.mean = self.mean * self.action_bound
 

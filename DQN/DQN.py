@@ -77,7 +77,7 @@ def q_learning(sess, env, approx, num_episodes, max_time_per_episode, action_spa
         decay = np.exp(-1 / (num_episodes / 15) * i_episode)
         policy = policy_fn(
             approx, epsilon, num_actions, i_episode, nTimes_actions, decay)
-        greedy = make_greedy_policy(approx, epsilon, num_actions, i_episode, nTimes_actions, decay)
+        #greedy = make_greedy_policy(approx, epsilon, num_actions, i_episode, nTimes_actions, decay)
 
         # Print out which episode we're on, useful for debugging.
         # Also print reward for last episode
@@ -89,26 +89,30 @@ def q_learning(sess, env, approx, num_episodes, max_time_per_episode, action_spa
         done = False
         i = 0
         p_r = 0
-        while not done and i < max_time_per_episode:
+        while i < max_time_per_episode:
             i += 1
             old_observation = observation
 
             action = policy(sess, observation)
-
             nTimes_actions[action] = nTimes_actions[action] + 1
             move = action_space[action]
             observation, reward, done, info = env.step([move])
+            if reward == 1 or i < batch_size:
 
-            buffer.add_transition(old_observation, action, observation, reward, done)
+                buffer.add_transition(old_observation, move, observation, reward, done)
             s, a, ns, r, d = buffer.next_batch(batch_size)
+
             pred = target.predict(sess, ns)
+
             td = r + discount_factor * np.amax(pred, axis=1)
 
             # merge = tf.summary.merge_all()
-            l = approx.update(sess, s, a, td, summary)
-            loss.append(l[0])
+            estimator_prop = approx.predict(sess, s)
+            #_, rewards, _, _ = env.step(np.take(action_space, np.argmax(estimator_prop, axis=1)))
+            l = approx.update(sess, s, a, td, estimator_prop, env, action_space, summary)
+            #loss.append(l[0])
 
-            writer.add_summary(l[1], i_episode)
+            #writer.add_summary(l[1], i_episode)
             #train_writer.flush()
 
             stats.episode_rewards[i_episode] += reward
@@ -116,7 +120,7 @@ def q_learning(sess, env, approx, num_episodes, max_time_per_episode, action_spa
             if stat > 0:
                 p_r += reward
 
-            if target is not None:
+            if i > batch_size and i % batch_size == 0:
                 target.update(sess)
 
         if stat > 0:
@@ -126,7 +130,7 @@ def q_learning(sess, env, approx, num_episodes, max_time_per_episode, action_spa
             i = 0
             while not done and i < max_time_per_episode:
                 i += 1
-                action = greedy(sess, observation)
+                action = policy(sess, observation)
                 move = action_space[action]
                 observation, reward, done, info = env.step([move])
                 g_r += reward
@@ -135,5 +139,5 @@ def q_learning(sess, env, approx, num_episodes, max_time_per_episode, action_spa
         loss_episodes.append(sum(loss))
         stats.episode_lengths[i_episode] = i
 
-    approx.save_model(sess)
+#    approx.save_model(sess)
     return stats, loss_episodes

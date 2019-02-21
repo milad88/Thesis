@@ -22,19 +22,19 @@ class Critic_Net(NeuralNetwork):
 
         self.inp_act = tf.concat([self.inp, self.action], 1)
 
-        self.inpW = tf.Variable(tf.random_uniform([self.state_dim +  self.action_dim, 16], -0.5, 0.5))
-        self.inpB = tf.Variable(tf.constant(0.1, shape=[16]))
+        self.inpW = tf.Variable(tf.random_uniform([self.state_dim +  self.action_dim, 64], -0.5, 0.5))
+        self.inpB = tf.Variable(tf.constant(0.1, shape=[64]))
         self.h1 = tf.nn.relu(tf.matmul(self.inp_act, self.inpW) + self.inpB)
 
-        self.h2W = tf.Variable(tf.random_uniform([16, 32], -0.5, 0.5))
-        self.h2B = tf.Variable(tf.constant(0.1, shape=[32]))
+        self.h2W = tf.Variable(tf.random_uniform([64, 128], -0.5, 0.5))
+        self.h2B = tf.Variable(tf.constant(0.1, shape=[128]))
         self.h2 = tf.nn.relu(tf.matmul(self.h1, self.h2W) + self.h2B)
 
-        self.h3W = tf.Variable(tf.random_uniform([32, 16], -0.5, 0.5))
-        self.h3B = tf.Variable(tf.constant(0.1, shape=[16]))
+        self.h3W = tf.Variable(tf.random_uniform([128, 64], -0.5, 0.5))
+        self.h3B = tf.Variable(tf.constant(0.1, shape=[64]))
         self.h3 = tf.nn.relu(tf.matmul(self.h2, self.h3W) + self.h3B)
 
-        self.h4W = tf.Variable(tf.random_uniform([16, self.action_dim], -0.5, 0.5))
+        self.h4W = tf.Variable(tf.random_uniform([64, self.action_dim], -0.5, 0.5))
 
         self.outB = tf.Variable(tf.constant(0.01, shape=[self.action_dim]))
         self.outputs = tf.nn.relu(tf.matmul(self.h3, self.h4W) + self.outB)

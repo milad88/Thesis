@@ -17,8 +17,8 @@ if __name__ == "__main__":
     learning_rate = 0.001
     delta = 0.01
     discount_factor = 0.99
-    num_episodes = 2
-    len_episode = 10
+    num_episodes = 10
+    len_episode = 100
     epsilon = 0.1
     load = False
     if not load:
@@ -122,10 +122,11 @@ if __name__ == "__main__":
                 stats.episode_lengths[i_episode] = i
 
                 gc.collect()
+                tf.keras.backend.clear_session()
                 #tf.reset_default_graph()
 
                 #tf.get_default_graph().finalize()
-            print(type(stats))
+
             plot_episode_stats(stats)
             plot_stats(loss_episodes)
             # return stats, loss_episodes

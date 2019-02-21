@@ -7,7 +7,7 @@ action_bound = 2.0
 
 
 class Actor_Net():
-    def __init__(self, num_actions, action_dim, name, action_bound, state_dim, learning_rate=0.01, batch_size=32):
+    def __init__(self, num_actions, action_dim, name, action_bound, state_dim, learning_rate=0.01, batch_size=128):
         # super().__init__(num_actions, name)
         self.learning_rate = learning_rate
         self.action_bound = action_bound
@@ -19,22 +19,22 @@ class Actor_Net():
 
     def _build_model(self, num_actions):
 
-        # self.action = tf.placeholder(dtype=tf.float32, shape=[None, self.action_dim])
+        # self.action = tf.placeholder(dtype=tf.float128, shape=[None, self.action_dim])
         self.inp = tf.placeholder(shape=[None, self.state_dim], dtype=tf.float32)
 
-        self.inpW = tf.Variable(tf.random_uniform([self.state_dim, 16], -0.5, 0.5))
-        self.inpB = tf.Variable(tf.constant(0.1, shape=[16]))
+        self.inpW = tf.Variable(tf.random_uniform([self.state_dim, 64], -0.5, 0.5))
+        self.inpB = tf.Variable(tf.constant(0.1, shape=[64]))
         self.h1 = tf.nn.relu(tf.matmul(self.inp, self.inpW) + self.inpB)
 
-        self.h2W = tf.Variable(tf.random_uniform([16, 32], -0.5, 0.5))
-        self.h2B = tf.Variable(tf.constant(0.1, shape=[32]))
+        self.h2W = tf.Variable(tf.random_uniform([64, 128], -0.5, 0.5))
+        self.h2B = tf.Variable(tf.constant(0.1, shape=[128]))
         self.h2 = tf.nn.relu(tf.matmul(self.h1, self.h2W) + self.h2B)
 
-        self.h3W = tf.Variable(tf.random_uniform([32, 16], -0.5, 0.5))
-        self.h3B = tf.Variable(tf.constant(0.1, shape=[16]))
+        self.h3W = tf.Variable(tf.random_uniform([128, 64], -0.5, 0.5))
+        self.h3B = tf.Variable(tf.constant(0.1, shape=[64]))
         self.h3 = tf.nn.relu(tf.matmul(self.h2, self.h3W) + self.h3B)
 
-        self.h4W = tf.Variable(tf.random_uniform([16, self.action_dim], -0.5, 0.5))
+        self.h4W = tf.Variable(tf.random_uniform([64, self.action_dim], -0.5, 0.5))
 
         self.outB = tf.Variable(tf.constant(0.01, shape=[self.action_dim]))
 
@@ -42,8 +42,11 @@ class Actor_Net():
         self.scaled_outputs = tf.scalar_mul(action_bound, self.outputs)
 
         self.action_gradients = tf.placeholder(tf.float32, [None, self.action_dim])
+        #self.target_critic_output = tf.placeholder(tf.float32, [None, self.action_dim])
 
         self.net_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.name)
+        #self.actor_loss = tf.reduce_mean(self.target_critic_output)
+        #self.optimize = tf.train.AdamOptimizer(self.learning_rate).minimize(self.actor_loss, var_list=self.net_params)
         self.actor_gradients = tf.gradients(ys=self.outputs, xs=self.net_params, grad_ys=-self.action_gradients)
 
         self.optimize = tf.train.AdamOptimizer(self.learning_rate).apply_gradients(
@@ -56,7 +59,7 @@ class Actor_Net():
 
 
 
-        # self.sy_ac_na = tf.placeholder(shape=[None, ac_dim], name="ac", dtype=tf.float32)
+        # self.sy_ac_na = tf.placeholder(shape=[None, ac_dim], name="ac", dtype=tf.float128)
         # Now, need to compute the logprob for each action taken.
         # self.action_dist = tf.contrib.distributions.Normal(loc=self.sy_mean_na, scale=tf.exp(sy_logstd_a), validate_args=True)
         # sy_logprob_n is in [batch_size, ac_dim] shape.
@@ -67,7 +70,7 @@ class Actor_Net():
         # sy_sampled_ac = action_dist.sample()[0]
 
 
-        # self.adv = tf.placeholder(shape=[None], name="adv", dtype=tf.float32)  # advantage function estimate
+        # self.adv = tf.placeholder(shape=[None], name="adv", dtype=tf.float128)  # advantage function estimate
 
         # We do tf.reduce_mean on sy_logprob_n here, as it's shape is [batch_size,
         # ac_dim]. Not sure what's the best way to deal with ac_dim -- but pendulum's

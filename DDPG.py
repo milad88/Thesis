@@ -14,10 +14,10 @@ if __name__ == "__main__":
     action_bound = env.action_space.high
     state_dim = 3
     batch_size = 32
-    learning_rate = 0.001 / batch_size
+    learning_rate = 0.0001 / batch_size
     discount_factor = 0.99
-    num_episodes = 2000
-    len_episode = 100
+    num_episodes = 5000
+    len_episode = 200
     epsilon = 0.1
     load = False
     if not load:
@@ -64,12 +64,12 @@ if __name__ == "__main__":
                 # to decay epsilon in case we use epsilon greedy decay policy
                 decay = np.exp(-1 / (num_episodes / 15) * i_episode)
 
-                greedy = make_greedy_policy(actor, epsilon, num_actions, i_episode, nTimes_actions, decay)
+                #greedy = make_greedy_policy(actor, epsilon, num_actions, i_episode, nTimes_actions, decay)
 
                 # Print out which episode we're on, useful for debugging.
                 # Also print reward for last episode
                 last_reward = stats.episode_rewards[i_episode - 1]
-                print("\rEpisode {}/{} ({})".format(i_episode + 1, num_episodes, last_reward), end="")
+                print("\rEpisode {}/{} ({})".format(i_episode + 1, num_episodes, last_reward))
                 sys.stdout.flush()
 
                 done = False
@@ -104,10 +104,11 @@ if __name__ == "__main__":
                     loss_critic = critic.update(sess, s, a, y, summ_critic_loss)
 
                     loss.append(loss_critic[0])
-
+                    #target_critic_out = target_critic.predict(sess,s,a)
                     a_grads = critic.action_gradients(sess, s, actor_outs)
 
                     sys.stdout.flush()
+                    #actor.update(sess, s, target_critic_out, None)
                     actor.update(sess, s, a_grads, None)
 
                     stats.episode_rewards[i_episode] += reward
