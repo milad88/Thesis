@@ -127,10 +127,10 @@ class ReplayBuffer:
 
     def add_transition(self, state, action, next_state, reward, done):
 
-        if np.array(state).shape == (3, 1):
+        if np.array(state).shape == (2, 1):
             state = list(itertools.chain.from_iterable(state))
 
-        if np.array(next_state).shape == (3, 1):
+        if np.array(next_state).shape == (2, 1):
             next_state = list(itertools.chain.from_iterable(next_state))
 
         if len(self._data.states) < self.capacity:

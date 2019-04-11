@@ -5,16 +5,17 @@ from Critic_Network_DDPG import *
 from Actor_Network_DDPG import *
 import tensorflow as tf
 from pendulum import PendulumEnv
+from continuous_moutain_car import Continuous_MountainCarEnv
 if __name__ == "__main__":
     print("start")
-    env = PendulumEnv()
-    action_space = np.arange(-2, 2.01, 0.01)
-    num_actions = len(action_space)
-    action_dim = 1
+    env = Continuous_MountainCarEnv()
+    action_space = env.action_space
+    # num_actions = len(action_space)
+    action_dim = env.action_space.shape[0]
     action_bound = env.action_space.high
-    state_dim = 3
+    state_dim = env.observation_space.shape[0]
     batch_size = 32
-    learning_rate = 0.0001 / batch_size
+    learning_rate = 0.001
     discount_factor = 0.99
     num_episodes = 5000
     len_episode = 200
@@ -26,24 +27,24 @@ if __name__ == "__main__":
 
         g_stat = []
         policy = policies[2]
-        fname = './DDPG/log/g_' + str(num_actions) + '.csv'
+        fname = './DDPG/log/g_.csv'
 
         with tf.Session() as sess:
 
             name = policy.__name__  # No reason to save more than one from each policy atm
             with tf.name_scope("actor"):
-                actor = Actor_Net(num_actions, action_dim, "actor", action_bound, state_dim,
+                actor = Actor_Net(action_dim, "actor", action_bound, state_dim,
                                   learning_rate=learning_rate)
 
             with tf.name_scope("critic"):
-                critic = Critic_Net(num_actions, action_dim, "critic", action_bound, state_dim,
+                critic = Critic_Net(action_dim, "critic", action_bound, state_dim,
                                     learning_rate=learning_rate)
 
             with tf.name_scope("actor_target"):
-                target_actor = Actor_Target_Network(num_actions, action_dim, "actor_target", action_bound, state_dim,
+                target_actor = Actor_Target_Network(action_dim, "actor_target", action_bound, state_dim, actor,
                                                     learning_rate=learning_rate)
             with tf.name_scope("critic_target"):
-                target_critic = Critic_Target_Network(num_actions, action_dim, "critic_target", action_bound, state_dim,
+                target_critic = Critic_Target_Network(action_dim, "critic_target", action_bound, state_dim, critic,
                                                       learning_rate=learning_rate)
 
             writer = tf.summary.FileWriter('./DDPG/log/DDPG_loss', sess.graph)
@@ -56,7 +57,10 @@ if __name__ == "__main__":
             loss_episodes = []
             stats = EpisodeStats(episode_lengths=np.zeros(num_episodes), episode_rewards=np.zeros(num_episodes))
             buffer = ReplayBuffer()
-            nTimes_actions = np.ones(num_actions)
+            # nTimes_actions = np.ones(num_actions)
+            action = 0
+            a_grads = 0
+            loss_critic = [0]
 
             for i_episode in range(num_episodes):
 
@@ -69,7 +73,11 @@ if __name__ == "__main__":
                 # Print out which episode we're on, useful for debugging.
                 # Also print reward for last episode
                 last_reward = stats.episode_rewards[i_episode - 1]
-                print("\rEpisode {}/{} ({})".format(i_episode + 1, num_episodes, last_reward))
+                grad = a_grads
+                if type(a_grads) == list:
+                    grad = a_grads[0][0]
+
+                print("\rEpisode {}/{} ({}) action {} gradient {} critic loss {}".format(i_episode + 1, num_episodes, last_reward, action, grad, loss_critic[0]))
                 sys.stdout.flush()
 
                 done = False
@@ -82,14 +90,17 @@ if __name__ == "__main__":
                     loss = []
                     i += 1
                     old_observation = observation
-                    action = np.take(actor.predict(sess, observation), [0])
 
+                    action = actor.predict(sess, [observation])
                     env.render()
-                    observation, reward, done, info = env.step([action])
+                    observation, reward, done, info = env.step(action)
                     #if i < 5 or reward > 0:
-                    buffer.add_transition(old_observation, action, observation, reward, done)
+                    buffer.add_transition(old_observation, action[0], observation, reward, done)
                     s, a, ns, r, d = buffer.next_batch(batch_size)
-
+                    print("observation**************")
+                    print(s)
+                    print()
+                    print()
                     pred_actions = target_actor.predict(sess, ns)
 
                     q_values = target_critic.predict(sess, ns, pred_actions)
@@ -99,8 +110,8 @@ if __name__ == "__main__":
 
                     g_r += reward
                     g_stat.append(int(np.round(g_r)))
-                    actor_outs = np.take(actor.predict(sess, s), 0, 1)
-                    actor_outs = np.reshape(actor_outs, [len(actor_outs), 1])
+                    actor_outs = actor.predict(sess, s)
+                    # actor_outs = np.reshape(actor_outs, [len(actor_outs), 1])
                     loss_critic = critic.update(sess, s, a, y, summ_critic_loss)
 
                     loss.append(loss_critic[0])
@@ -117,7 +128,8 @@ if __name__ == "__main__":
                     target_actor.update(sess)
 
                     g_stat.append(int(np.round(g_r)))
-
+                    print("net params critic")
+                    print(sess.run(critic.net_params[0][0]))
                 l = sum(loss)
                 summ_critic_loss = tf.Summary(value=[tf.Summary.Value(tag="loss_critic",
                                                                       simple_value=l)])
